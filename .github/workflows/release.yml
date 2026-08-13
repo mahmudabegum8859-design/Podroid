@@ -9,8 +9,10 @@
 # The APK is a single **universal** build containing native binaries for all
 # ABIs (arm64-v8a + armeabi-v7a + x86_64); `build-all.sh qemu` cross-compiles
 # QEMU once per ABI inside Docker. The first run compiles three QEMU builds
-# (~3-4 h), after which Docker layer caches make re-runs cheap. 32-bit x86
-# (i686) is intentionally absent — QEMU 11 dropped 32-bit host support.
+# (~3-4 h), after which Docker layer caches make re-runs cheap. QEMU is
+# pinned to the 10.2 series (gradle.properties) because QEMU 11 dropped
+# 32-bit host support; armeabi-v7a cannot build against 11.x. 32-bit x86
+# (i686) is not shipped.
 #
 # Before releasing, bump `versionCode` / `versionName` in app/build.gradle.kts
 # (monotonic versionCode is required for in-place installs — CLAUDE.md:

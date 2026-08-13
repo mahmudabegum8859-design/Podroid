@@ -11,8 +11,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # QEMU + native helpers are cross-built per ABI; the guest (kernel/initramfs/
 # rootfs) is aarch64 and shared. Keep this list in sync with the Dockerfile's
 # qemu-builder ABI case and app/build.gradle.kts ndk.abiFilters. x86_64 covers
-# Intel/AMD Android (ChromeOS, emulators); 32-bit x86 (i686) is NOT supported
-# because QEMU 11 removed 32-bit host support upstream.
+# Intel/AMD Android (ChromeOS, emulators); 32-bit x86 (i686) is not shipped
+# (no such devices). QEMU is pinned to 10.2.x (gradle.properties) because QEMU
+# 11 removed 32-bit host support — the armeabi-v7a build needs it.
 ABIS=(arm64-v8a armeabi-v7a x86_64)
 JNILIBS="${SCRIPT_DIR}/app/src/main/jniLibs"
 ASSETS="${SCRIPT_DIR}/app/src/main/assets"

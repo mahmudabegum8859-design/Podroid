@@ -58,7 +58,7 @@ adb shell run-as com.excp.podroid.debug cat files/console.log   # debug build
 
 **Release builds** are signed via `signingConfigs.release` (keystore `podroid-release.jks`), fed by the `PODROID_RELEASE_STORE_FILE` / `_PASSWORD` / `_KEY_ALIAS` / `_KEY_PASSWORD` Gradle properties. Release `applicationId = com.excp.podroid`; debug gets `applicationIdSuffix = ".debug"` + `versionNameSuffix = "-debug"`. Any code comparing the local version against an upstream release tag must strip an optional `-debug` suffix (see `UpdateRepository.checkForUpdate`).
 
-arm64 native binaries require **16KB page alignment** (`-Wl,-z,max-page-size=16384`) - mandatory on Android 13+ 16KB-page devices; verified by an ELF parser in `build-all.sh`. armv7 and x86_64 binaries are 4KB-page and skip both the flag and the check. 32-bit x86 (i686) is **not** shipped: QEMU 11 removed 32-bit host support upstream.
+arm64 native binaries require **16KB page alignment** (`-Wl,-z,max-page-size=16384`) - mandatory on Android 13+ 16KB-page devices; verified by an ELF parser in `build-all.sh`. armv7 and x86_64 binaries are 4KB-page and skip both the flag and the check. QEMU is pinned to the **10.2 series** (`podroidQemuVersion` in `gradle.properties`) because **QEMU 11 removed 32-bit host support** (`tcg/arm`) — the armeabi-v7a build cannot compile against 11.x. 32-bit x86 (i686) is not shipped.
 
 ## Architecture
 
@@ -183,7 +183,7 @@ Single-activity Compose app: `ui/navigation/NavGraph.kt` routes `setup → home 
 
 ## Native Binaries (`app/src/main/jniLibs/{arm64-v8a,armeabi-v7a,x86_64}/`)
 
-ELF executables renamed `.so` for APK packaging; run via `ProcessBuilder` / `TerminalSession`, not loaded as JNI libraries. Built **once per ABI** by the Dockerfile's `qemu-builder` stage (`build-all.sh qemu`); the guest kernel/initramfs/rootfs are aarch64 and shared across ABIs. The 16KB-page alignment requirement applies to **arm64 only** (Android 13+ 16KB-page devices); armv7 and x86_64 are always 4KB pages and get no `max-page-size` flag. The arm64 build carries the PAC-safe sigsetjmp shim; armv7/x86_64 use libc's. 32-bit x86 (i686) is not supported because QEMU 11 removed 32-bit host support upstream.
+ELF executables renamed `.so` for APK packaging; run via `ProcessBuilder` / `TerminalSession`, not loaded as JNI libraries. Built **once per ABI** by the Dockerfile's `qemu-builder` stage (`build-all.sh qemu`); the guest kernel/initramfs/rootfs are aarch64 and shared across ABIs. The 16KB-page alignment requirement applies to **arm64 only** (Android 13+ 16KB-page devices); armv7 and x86_64 are always 4KB pages and get no `max-page-size` flag. The arm64 build carries the PAC-safe sigsetjmp shim; armv7/x86_64 use libc's. QEMU is pinned to the **10.2 series** — QEMU 11 dropped 32-bit host support (`tcg/arm`), so armeabi-v7a cannot build against 11.x. 32-bit x86 (i686) is not shipped.
 
 | File | What it is |
 |---|---|

@@ -205,7 +205,7 @@ RUN cd /rootfs && find . | cpio -o -H newc 2>/dev/null | gzip -9 > /output/initr
 # ==============================================================================
 
 FROM debian:bookworm AS qemu-builder
-ARG QEMU_VERSION=11.0.0
+ARG QEMU_VERSION=10.2.4
 ARG ABI=arm64-v8a
 ENV QEMU_DIR=qemu-${QEMU_VERSION}
 ENV DEBIAN_FRONTEND=noninteractive
@@ -261,8 +261,9 @@ RUN case "$ABI" in \
         ;; \
       x86_64) \
         # Intel/AMD Android (ChromeOS, emulators). 4KB pages, 64-bit atomics
-        # live in libc. 32-bit x86 (i686) is NOT supported: QEMU 11 removed
-        # 32-bit host support upstream, so an i686 Android build cannot work.
+        # live in libc. 32-bit x86 (i686) is not shipped — essentially no such
+        # devices exist, and newer QEMU lines (11+) dropped 32-bit hosts; we
+        # pin 10.2.x anyway so the armeabi-v7a build keeps working.
         echo 'export NDK=/opt/ndk' \
         && echo 'export LLVM=/opt/ndk/toolchains/llvm/prebuilt/linux-x86_64' \
         && echo 'export PREFIX=/opt/deps' \

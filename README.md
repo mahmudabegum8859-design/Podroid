@@ -37,7 +37,7 @@ A real Alpine Linux VM with its own kernel - not a chroot or proot trick - so **
 - **In-app terminal** - full xterm-256color, 122 color themes, 13 fonts, live resize
 - **X11 desktop** - run GUI Linux apps in a built-in viewer with touch, keyboard, mouse and audio
 - **USB passthrough**, **SSH**, **port forwarding** and a **guest-to-Android bridge**
-- **English and 中文**, no root, arm64-v8a, armeabi-v7a (32-bit ARM) **and x86_64** devices on Android 8+ (the guest VM is always aarch64; 32-bit x86 is not supported because QEMU 11 dropped 32-bit host builds)
+- **English and 中文**, no root, arm64-v8a, armeabi-v7a (32-bit ARM) **and x86_64** devices on Android 8+ (the guest VM is always aarch64; QEMU is pinned to 10.2 because QEMU 11 dropped the 32-bit host support armeabi-v7a needs)
 
 ## Quick start
 

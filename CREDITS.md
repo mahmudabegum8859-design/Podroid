@@ -59,7 +59,7 @@ The in-app X11 viewer is backed by these components running inside the VM. Podro
 ## Emulation
 
 ### QEMU
-QEMU provides the machine emulation that makes everything else possible. Podroid currently builds against QEMU 11.0.0, cross-compiled for arm64 Android.
+QEMU provides the machine emulation that makes everything else possible. Podroid builds against QEMU 10.2.4 (pinned to the 10.2 series: QEMU 11 dropped 32-bit host support, which armeabi-v7a needs), cross-compiled per Android ABI.
 
 - Project: https://www.qemu.org
 - Repository: https://gitlab.com/qemu-project/qemu

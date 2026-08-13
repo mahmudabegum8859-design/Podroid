@@ -26,7 +26,7 @@ You will need:
 ./build-all.sh kernel       # custom Linux 6.6.87 (~5–10 min, Docker-cached)
 ./build-all.sh initramfs    # kernel + minimal initramfs
 ./build-all.sh rootfs       # Alpine 3.23 squashfs (~30 s, Docker-cached)
-./build-all.sh qemu         # QEMU 11 + podroid-bridge (~30 min first run)
+./build-all.sh qemu         # QEMU 10.2 + podroid-bridge (~30 min first run)
 ./build-all.sh termux       # libtermux.so via local NDK
 ./gradlew installDebug      # build + install the APK
 ```
