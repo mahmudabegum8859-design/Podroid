@@ -62,6 +62,15 @@ jobs:
             "ndk;27.2.12479018" \
             --sdk_root="$ANDROID_HOME"
 
+      # Register qemu-user binfmt so Docker's arm64 stages (the initramfs
+      # rootfs-builder and build-rootfs's vsock-builder, which RUN arm64
+      # binaries on this x86_64 runner) can execute. Without this, those
+      # stages die with "exec /bin/sh: exec format error".
+      - name: Set up QEMU for Docker arm64 stages
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       # Kernel + initramfs + Alpine rootfs + QEMU (Docker) + debug APK.
       # First run compiles QEMU from source (~30-60 min); Docker layer caches
       # make re-runs cheap. `--fast` skips QEMU when binaries already exist.
