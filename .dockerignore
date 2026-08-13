@@ -1,0 +1,14 @@
+# Generated VM artifacts — never ship these back into docker build contexts
+# (they are OUTPUTS of the docker builds, and including them bloats every
+# build context by hundreds of MB).
+app/src/main/assets/vmlinuz-virt
+app/src/main/assets/initrd.img
+app/src/main/assets/alpine-rootfs.squashfs
+app/src/main/jniLibs/
+app/build/
+build/
+.gradle/
+.git/
+*.apk
+*.jks
+local.properties

@@ -34,15 +34,14 @@ android {
         // Ship every ABI we cross-build native binaries for. The VM guest stays
         // aarch64 (kernel/rootfs are shared); only QEMU + the native helpers
         // differ — 64-bit ARM is the primary target, 32-bit ARM (armeabi-v7a)
-        // runs the same aarch64 guest under TCG on legacy devices, and x86_64
-        // covers Intel/AMD Android (ChromeOS, emulators). QEMU is pinned to the
-        // 10.2 series (see gradle.properties) because QEMU 11 dropped 32-bit
-        // host support — without 10.x the armeabi-v7a build cannot compile.
-        // 32-bit x86 (i686) is not shipped (essentially no such devices).
+        // runs the same aarch64 guest under TCG on legacy devices. QEMU is
+        // pinned to the 10.2 series (see gradle.properties) because QEMU 11
+        // dropped 32-bit host support — without 10.x the armeabi-v7a build
+        // cannot compile. 32-bit x86 (i686) and x86_64 are not shipped.
         // Keep in sync with build-all.sh ABIS and the Dockerfile qemu-builder
         // ABI case.
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
     }
 

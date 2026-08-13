@@ -10,11 +10,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # QEMU + native helpers are cross-built per ABI; the guest (kernel/initramfs/
 # rootfs) is aarch64 and shared. Keep this list in sync with the Dockerfile's
-# qemu-builder ABI case and app/build.gradle.kts ndk.abiFilters. x86_64 covers
-# Intel/AMD Android (ChromeOS, emulators); 32-bit x86 (i686) is not shipped
-# (no such devices). QEMU is pinned to 10.2.x (gradle.properties) because QEMU
-# 11 removed 32-bit host support — the armeabi-v7a build needs it.
-ABIS=(arm64-v8a armeabi-v7a x86_64)
+# qemu-builder ABI case and app/build.gradle.kts ndk.abiFilters. 64-bit ARM is
+# primary; 32-bit ARM (armeabi-v7a) runs the same aarch64 guest under TCG on
+# legacy devices. x86_64 and i686 are not shipped. QEMU is pinned to 10.2.x
+# (gradle.properties) because QEMU 11 removed 32-bit host support — the
+# armeabi-v7a build needs it.
+ABIS=(arm64-v8a armeabi-v7a)
 JNILIBS="${SCRIPT_DIR}/app/src/main/jniLibs"
 ASSETS="${SCRIPT_DIR}/app/src/main/assets"
 
@@ -166,11 +167,26 @@ build_rootfs() {
     log "Building Alpine rootfs squashfs..."
     local sysver
     sysver=$(grep -E '^[[:space:]]*versionCode[[:space:]]*=' "${SCRIPT_DIR}/app/build.gradle.kts" | grep -oE '[0-9]+' | head -1)
-    docker_build -f "${SCRIPT_DIR}/build-rootfs/Dockerfile.rootfs" \
-        -t podroid-rootfs:latest \
-        --build-arg "SYSTEM_VERSION=${sysver:-0}" \
-        --output type=local,dest="${ASSETS}" \
-        "${SCRIPT_DIR}/build-rootfs/"
+    if docker buildx version >/dev/null 2>&1; then
+        # BuildKit: export the squashfs straight to the assets dir.
+        docker_build --network=host -f "${SCRIPT_DIR}/build-rootfs/Dockerfile.rootfs" \
+            -t podroid-rootfs:latest \
+            --build-arg "SYSTEM_VERSION=${sysver:-0}" \
+            --output type=local,dest="${ASSETS}" \
+            "${SCRIPT_DIR}/build-rootfs/"
+    else
+        # Classic builder (Docker < 23 without buildx, e.g. Debian 12's
+        # docker.io): `--output type=local` is silently ignored, so tag the
+        # image and pull the squashfs out of the export stage with docker cp.
+        docker_build --network=host -f "${SCRIPT_DIR}/build-rootfs/Dockerfile.rootfs" \
+            -t podroid-rootfs:latest \
+            --build-arg "SYSTEM_VERSION=${sysver:-0}" \
+            "${SCRIPT_DIR}/build-rootfs/"
+        docker rm -f podroid-rootfs-extract 2>/dev/null || true
+        docker create --name podroid-rootfs-extract podroid-rootfs:latest /bin/true
+        docker cp podroid-rootfs-extract:/alpine-rootfs.squashfs "$ASSETS/alpine-rootfs.squashfs"
+        docker rm podroid-rootfs-extract >/dev/null
+    fi
     success "Built ${ASSETS}/alpine-rootfs.squashfs ($(du -h "${ASSETS}/alpine-rootfs.squashfs" | cut -f1)), system-version ${sysver:-0}"
 }
 
@@ -180,7 +196,7 @@ build_qemu() {
     mkdir -p "$ASSETS/qemu/keymaps"
     for abi in "${ABIS[@]}"; do
         log "Building QEMU ${qemu_ver} for Android ${abi} (Docker)..."
-        docker_build_load --build-arg "QEMU_VERSION=${qemu_ver}" --build-arg "ABI=${abi}" \
+        docker_build_load --network=host --build-arg "QEMU_VERSION=${qemu_ver}" --build-arg "ABI=${abi}" \
             -t "podroid-qemu-builder-${abi}" --target qemu-builder "${SCRIPT_DIR}"
 
         log "Extracting ${abi} artifacts..."
@@ -201,8 +217,7 @@ build_qemu() {
         docker rm "podroid-qemu-extract-${abi}" >/dev/null
 
         # 16KB page alignment is an arm64 requirement (Android 13+ 16KB-page
-        # devices). 32-bit ARM and x86_64 Android are always 4KB pages — no
-        # flag, no check.
+        # devices). 32-bit ARM is always 4KB pages — no flag, no check.
         if [ "$abi" = arm64-v8a ]; then
             verify_16kb_align "$out/libqemu-system-aarch64.so"
         fi

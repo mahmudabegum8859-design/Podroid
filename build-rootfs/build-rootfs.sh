@@ -48,6 +48,34 @@ apk -X "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_BRANCH}/main" \
     font-cursor-misc \
     ttf-dejavu
 
+# Linux firmware for USB Wi-Fi dongles passed through to the VM. All WiFi
+# drivers are =y built into the kernel; these provide the /lib/firmware blobs
+# they request at probe time:
+#   ath9k_htc    - Atheros AR9271/AR7010 (CONFIG_ATH9K_HTC)
+#   brcm         - Broadcom brcmfmac USB (BCM43143/43242/43569...)
+#   mediatek     - MediaTek MT76 USB (mt7601u/mt7610u/mt7662u/mt7921u)
+#   other        - carl9170, ar5523, ar7010/ar9170/ar9271 + Ralink rt2x00
+#                  (rt2870.bin covers every rt2800usb chip in the 7.0 kernel,
+#                  rt73.bin for rt73usb, rt2561/rt2661 for the old PCI)
+#   rtlwifi      - ALL Realtek rtlwifi/rtl8xxxu blobs, incl.
+#                  rtl8188fufw.bin (RTL8188FTV) + rtl8188eu/8192cu/8723au
+#   rtw88        - Realtek rtw88 blobs (rtw8822b/8822c/8723d/8821c +
+#                  rtw8821a/8812a/8814a for the AU-series USB dongles)
+#   ath10k       - Qualcomm QCA9377/QCA9379 USB (CONFIG_ATH10K_USB)
+#   zd1211       - ZyDAS ZD1211/ZG3211 802.11g dongles (CONFIG_ZD1211RW) -
+#                  packaged separately from linux-firmware-other in Alpine
+apk -X "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_BRANCH}/main" \
+    -X "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_BRANCH}/community" \
+    -U --allow-untrusted --root "$ROOTFS" --initdb add \
+    linux-firmware-ath9k_htc \
+    linux-firmware-ath10k \
+    linux-firmware-brcm \
+    linux-firmware-mediatek \
+    linux-firmware-other \
+    linux-firmware-rtlwifi \
+    linux-firmware-rtw88 \
+    zd1211-firmware
+
 # Apply file capabilities to newuidmap/newgidmap. apk's package install often
 # does this, but we set them explicitly so the squashfs ships with the
 # correct security.capability xattr (preserved by mksquashfs without -no-xattrs).

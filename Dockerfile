@@ -138,7 +138,9 @@ RUN cd linux-${KERNEL_VERSION} \
                   VSOCKETS VIRTIO_VSOCKETS \
                   RFKILL LEDS_CLASS CFG80211 MAC80211 RTW88 BT \
                   USB USB_SUPPORT WLAN \
-                  RTW88_8821AU RTW88_8812AU RTW88_8814AU \
+                   RTW88_8821AU RTW88_8812AU RTW88_8814AU \
+                   RTL8XXXU RTL8XXXU_UNTESTED ATH10K ATH10K_USB \
+                   MT7663U MT7921U \
                   FW_LOADER_COMPRESS FW_LOADER_COMPRESS_ZSTD UNICODE \
                   USB_XHCI_HCD USB_XHCI_PCI USB_STORAGE USB_UAS \
                   SCSI BLK_DEV_SD VFAT_FS EXFAT_FS; do \
@@ -225,10 +227,10 @@ RUN wget -q https://dl.google.com/android/repository/android-ndk-r27c-linux.zip 
 #   SYSROOT_LIBDIR  sysroot lib dir to seed with our static shims
 #   CONFIG_HOST     autoconf --host triplet
 #   MESON_CROSS     meson cross file for glib/pixman
-#   UC_ARCH         libucontext arch (aarch64 / arm / x86_64)
+#   UC_ARCH         libucontext arch (aarch64 / arm)
 #   QEMU_ALIGN      -Wl,-z,max-page-size=16384 on arm64 only (mandatory on
 #                    Android 13+ 16KB-page devices; meaningless on 4KB 32-bit
-#                    ARM / x86_64)
+#                    ARM)
 #   EXTRA_ATOMIC    -latomic on armv7 (Bionic 64-bit atomics live in a lib)
 RUN case "$ABI" in \
       arm64-v8a) \
@@ -259,24 +261,6 @@ RUN case "$ABI" in \
         && echo 'export QEMU_ALIGN=' \
         && echo 'export EXTRA_ATOMIC=-latomic' \
         ;; \
-      x86_64) \
-        # Intel/AMD Android (ChromeOS, emulators). 4KB pages, 64-bit atomics
-        # live in libc. 32-bit x86 (i686) is not shipped — essentially no such
-        # devices exist, and newer QEMU lines (11+) dropped 32-bit hosts; we
-        # pin 10.2.x anyway so the armeabi-v7a build keeps working.
-        echo 'export NDK=/opt/ndk' \
-        && echo 'export LLVM=/opt/ndk/toolchains/llvm/prebuilt/linux-x86_64' \
-        && echo 'export PREFIX=/opt/deps' \
-        && echo 'export CLANG=x86_64-linux-android26-clang' \
-        && echo 'export TARGET=x86_64-linux-android26' \
-        && echo 'export SYSROOT_LIBDIR=x86_64-linux-android' \
-        && echo 'export CONFIG_HOST=x86_64-linux-android' \
-        && echo 'export MESON_CROSS=/opt/cross-android-x86_64.ini' \
-        && echo 'export PKGCONFIG=x86_64-android-pkg-config' \
-        && echo 'export UC_ARCH=x86_64' \
-        && echo 'export QEMU_ALIGN=' \
-        && echo 'export EXTRA_ATOMIC=' \
-        ;; \
       *) echo "FATAL: unsupported ABI '$ABI'" >&2; exit 1 ;; \
     esac > /opt/abi.env \
     && printf 'export CC="${LLVM}/bin/${CLANG}"\nexport AR="${LLVM}/bin/llvm-ar"\nexport RANLIB="${LLVM}/bin/llvm-ranlib"\n' >> /opt/abi.env \
@@ -305,8 +289,8 @@ RUN . /opt/abi.env && printf '#ifndef PODROID_ICONV_H\n#define PODROID_ICONV_H\n
     && cp ${PREFIX}/lib/libiconv.a ${LLVM}/sysroot/usr/lib/${SYSROOT_LIBDIR}/26/libiconv.a
 RUN . /opt/abi.env && wget -q https://download.gnome.org/sources/glib/2.82/glib-2.82.5.tar.xz&& tar xf glib-2.82.5.tar.xz && cd glib-2.82.5 && meson setup _build --cross-file ${MESON_CROSS} --prefix ${PREFIX} --default-library static -Dselinux=disabled -Dlibmount=disabled && ninja -C _build install
 RUN . /opt/abi.env && wget -q https://cairographics.org/releases/pixman-0.44.2.tar.xz && tar xf pixman-0.44.2.tar.xz && cd pixman-0.44.2 && \
-    if [ "$ABI" = arm64-v8a ]; then NEON_FLAG="-Da64-neon=disabled"; else NEON_FLAG=""; fi && \
-    meson setup _build --cross-file ${MESON_CROSS} --prefix ${PREFIX} --default-library static ${NEON_FLAG} && ninja -C _build install
+    if [ "$ABI" = arm64-v8a ]; then PIXMAN_FLAG="-Da64-neon=disabled"; elif [ "$ABI" = armeabi-v7a ]; then PIXMAN_FLAG="-Dneon=disabled -Darm-simd=disabled"; else PIXMAN_FLAG=""; fi && \
+    meson setup _build --cross-file ${MESON_CROSS} --prefix ${PREFIX} --default-library static ${PIXMAN_FLAG} && ninja -C _build install
 RUN . /opt/abi.env && (wget -q --tries=3 -O attr-2.5.2.tar.gz https://download.savannah.gnu.org/releases/attr/attr-2.5.2.tar.gz || wget -q --tries=3 -O attr-2.5.2.tar.gz https://deb.debian.org/debian/pool/main/a/attr/attr_2.5.2.orig.tar.xz) && tar xf attr-2.5.2.tar.gz && cd attr-2.5.2 && ./configure --host=${CONFIG_HOST} --prefix=${PREFIX} --enable-static --disable-shared CC="${CC}" && make -j$(nproc) install && cp ${PREFIX}/lib/libattr.a ${LLVM}/sysroot/usr/lib/${SYSROOT_LIBDIR}/26/libattr.a
 RUN . /opt/abi.env && git clone --depth=1 https://github.com/kaniini/libucontext.git /tmp/libucontext && make -C /tmp/libucontext ARCH=${UC_ARCH} CC="${CC}" EXPORT_UNPREFIXED=yes && install -Dm644 /tmp/libucontext/libucontext.a ${PREFIX}/lib/libucontext.a && install -Dm644 /tmp/libucontext/include/libucontext/libucontext.h ${PREFIX}/include/libucontext/libucontext.h && find /tmp/libucontext -name bits.h -path '*libucontext*' -exec install -Dm644 {} ${PREFIX}/include/libucontext/bits.h \; \
     && printf '#ifndef PODROID_UCONTEXT_SHIM_H\n#define PODROID_UCONTEXT_SHIM_H\n#include_next <ucontext.h>\n#include <libucontext/libucontext.h>\n#define getcontext libucontext_getcontext\n#define makecontext libucontext_makecontext\n#define setcontext libucontext_setcontext\n#define swapcontext libucontext_swapcontext\n#endif\n' > ${PREFIX}/include/ucontext.h
@@ -323,6 +307,11 @@ RUN . /opt/abi.env && wget -q https://github.com/libusb/libusb/releases/download
 # QEMU Build (committed flags — no LTO, no -O3 — plus minimal Android compat patches)
 RUN wget -q https://download.qemu.org/${QEMU_DIR}.tar.xz && tar xf ${QEMU_DIR}.tar.xz
 RUN sed -i "s/rt = cc.find_library('rt', required: true)/rt = cc.find_library('rt', required: false)/" ${QEMU_DIR}/meson.build
+# QEMU 10.x disallows 64-bit guests (aarch64) on 32-bit hosts (armeabi-v7a) as
+# a policy — TCG's tcg/arm backend supports it (register pairs, slow but works).
+# Neutralize the check so armv7 can emulate aarch64. arm64 unaffected
+# (host_long_bits == 64 >= TARGET_LONG_BITS, the check never triggers).
+RUN sed -i "s/if host_long_bits < config_target\['TARGET_LONG_BITS'\].to_int()/if false/" ${QEMU_DIR}/meson.build && grep -q "if false" ${QEMU_DIR}/meson.build
 RUN printf '#undef st_atime_nsec\n#undef st_mtime_nsec\n#undef st_ctime_nsec\n' | cat - ${QEMU_DIR}/fsdev/9p-marshal.h > /tmp/9p-marshal.h && mv /tmp/9p-marshal.h ${QEMU_DIR}/fsdev/9p-marshal.h
 # ivshmem-{server,client} also call shm_open; stub their meson.build files since we don't ship them
 RUN printf '# disabled for Android Bionic\n' > ${QEMU_DIR}/contrib/ivshmem-server/meson.build \
@@ -382,7 +371,6 @@ RUN sed -i 's@udev->speed = speed_map\[libusb_speed\];@udev->speed = speed_map[l
 RUN . /opt/abi.env && cd ${QEMU_DIR} && \
     JMPLIB=""; [ "$ABI" = arm64-v8a ] && JMPLIB="${PREFIX}/lib/libqemujmp.a"; \
     CPU_FLAG=""; [ "$ABI" = armeabi-v7a ] && CPU_FLAG="--cpu=arm"; \
-    [ "$ABI" = x86_64 ] && CPU_FLAG="--cpu=x86_64"; \
     ./configure --cc="${CC}" --cross-prefix="${LLVM}/bin/llvm-" --extra-cflags="-fPIC -DANDROID -include /opt/shm_shim.h -I${PREFIX}/include -I${PREFIX}/include/glib-2.0 -I${PREFIX}/lib/glib-2.0/include" --extra-ldflags="-L${PREFIX}/lib ${QEMU_ALIGN} ${EXTRA_ATOMIC} ${PREFIX}/lib/libucontext.a ${PREFIX}/lib/libshm.a ${JMPLIB}" --prefix=/opt/qemu-out --target-list=aarch64-softmmu --enable-tcg --enable-slirp --enable-virtfs --enable-libusb --enable-pie --disable-docs --disable-gtk --disable-sdl --disable-vnc --disable-vhost-user --disable-plugins --with-coroutine=ucontext ${CPU_FLAG} && make -j$(nproc) install
 
 # Bridge
