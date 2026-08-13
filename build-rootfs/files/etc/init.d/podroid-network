@@ -48,11 +48,10 @@ start() {
         fi
     else
         # QEMU/TCG backend: SLIRP runs its own DHCP server at 10.0.2.2 (leases
-        # 10.0.2.15) and DNS at 10.0.2.3. Prefer udhcpc — it configures the
-        # address, default route AND resolv.conf atomically and self-heals if
-        # the link is re-created. Fall back to the historical static config
-        # only when the DHCP client is missing or the server never answers
-        # (some host firewalls block the BOOTP exchange).
+        # 10.0.2.15) and a guest-facing DNS at 10.0.2.3. Prefer udhcpc — it
+        # configures the address and default route atomically. Fall back to the
+        # historical static config only when the DHCP client is missing or the
+        # server never answers (some host firewalls block the BOOTP exchange).
         if command -v udhcpc >/dev/null 2>&1; then
             udhcpc -i "$NETIF" -t 8 -T 1 -A 1 -q -f -n 2>/dev/null || true
         fi
@@ -61,9 +60,14 @@ start() {
         fi
         # DHCP or static, make sure the SLIRP gateway route exists (idempotent).
         ip route add default via 10.0.2.2 dev "$NETIF" 2>/dev/null || true
-        # Belt-and-suspenders DNS: SLIRP's forwarder first, public resolvers as
-        # fallbacks (busybox udhcpc scripts vary in whether they write resolv.conf).
-        printf 'nameserver 10.0.2.3\nnameserver 8.8.8.8\nnameserver 1.1.1.1\n' \
+        # DNS: PUBLIC resolvers FIRST, SLIRP's forwarder last. SLIRP's internal
+        # forwarder resolves the host's resolv.conf, which doesn't exist on
+        # Android — with no upstream it can't answer, so a guest pointed at
+        # 10.0.2.3 first (the historical order) got slow/timeout lookups and
+        # "internet broken" (apk/curl/podman pulls all fail). Public DNS goes
+        # straight through SLIRP's NAT and works everywhere; 10.0.2.3 stays as
+        # a last-resort for hosts that block direct outbound DNS.
+        printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\nnameserver 10.0.2.3\n' \
             > /etc/resolv.conf
         # Mirror the AVF post-check: if the static assignment didn't stick
         # (wrong NIC, link not up), don't report success. Dependents that
@@ -74,6 +78,11 @@ start() {
             return 1
         fi
     fi
+    # Report the assigned address on the console: it lands in console.log, so
+    # the app's boot log (and the automated boot test's "IP:" check) shows the
+    # VM's own address instead of a silent "no IP".
+    VM_IP=$(ip -o -4 addr show dev "$NETIF" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+    echo "IP: ${VM_IP:-none}" > /dev/console
     echo "Network found" > /dev/console
     eend 0
 }

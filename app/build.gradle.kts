@@ -25,8 +25,8 @@ android {
         applicationId = "com.excp.podroid"
         minSdk = 26
         targetSdk = 36
-        versionCode = 30
-        versionName = "1.3.0"
+        versionCode = 31
+        versionName = "1.3.1"
         buildConfigField("String", "QEMU_VERSION", "\"$podroidQemuVersion\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -34,10 +34,13 @@ android {
         // Ship every ABI we cross-build native binaries for. The VM guest stays
         // aarch64 (kernel/rootfs are shared); only QEMU + the native helpers
         // differ — 64-bit ARM is the primary target, 32-bit ARM (armeabi-v7a)
-        // runs the same aarch64 guest under TCG on legacy devices. Keep in sync
-        // with build-all.sh ABIS and the Dockerfile qemu-builder ABI case.
+        // runs the same aarch64 guest under TCG on legacy devices, and x86_64
+        // covers Intel/AMD Android (ChromeOS, emulators). 32-bit x86 (i686) is
+        // intentionally absent: QEMU 11 dropped 32-bit host support upstream.
+        // Keep in sync with build-all.sh ABIS and the Dockerfile qemu-builder
+        // ABI case.
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
     }
 

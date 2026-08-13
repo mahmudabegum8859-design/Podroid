@@ -4,7 +4,7 @@ Guidance for Claude Code (and any AI assistant or new contributor) working in th
 
 ## What Is This
 
-Podroid is an Android app that runs a real **Alpine 3.23** Linux VM on stock Android 8+ (arm64-v8a and armeabi-v7a; the guest is always aarch64) to provide rootless **Podman / Docker / LXC** containers and an in-app **X11 desktop** - no root, no custom recovery.
+Podroid is an Android app that runs a real **Alpine 3.23** Linux VM on stock Android 8+ (arm64-v8a, armeabi-v7a, x86_64; the guest is always aarch64) to provide rootless **Podman / Docker / LXC** containers and an in-app **X11 desktop** - no root, no custom recovery.
 
 - **Two interchangeable VM backends** behind one interface (`VmEngine`):
   - **QEMU (TCG)** - software emulation, the default, needs no special permission.
@@ -19,7 +19,7 @@ Podroid is an Android app that runs a real **Alpine 3.23** Linux VM on stock And
 | Package | `com.excp.podroid` (debug: `com.excp.podroid.debug`) |
 | Version | `versionName` / `versionCode` in `app/build.gradle.kts` |
 | Min / target SDK | 26 (Android 8) / 36 |
-| Architecture | App: `arm64-v8a` + `armeabi-v7a`; guest: `aarch64` |
+| Architecture | App: `arm64-v8a` + `armeabi-v7a` + `x86_64`; guest: `aarch64` |
 | Guest | Alpine 3.23 squashfs + persistent ext4 overlay, OpenRC PID 1 |
 | Kernel | custom Linux, version pinned by `podroidKernelVersion` in `gradle.properties` |
 | QEMU | version pinned by `podroidQemuVersion` in `gradle.properties` |
@@ -58,7 +58,7 @@ adb shell run-as com.excp.podroid.debug cat files/console.log   # debug build
 
 **Release builds** are signed via `signingConfigs.release` (keystore `podroid-release.jks`), fed by the `PODROID_RELEASE_STORE_FILE` / `_PASSWORD` / `_KEY_ALIAS` / `_KEY_PASSWORD` Gradle properties. Release `applicationId = com.excp.podroid`; debug gets `applicationIdSuffix = ".debug"` + `versionNameSuffix = "-debug"`. Any code comparing the local version against an upstream release tag must strip an optional `-debug` suffix (see `UpdateRepository.checkForUpdate`).
 
-arm64 native binaries require **16KB page alignment** (`-Wl,-z,max-page-size=16384`) - mandatory on Android 13+ 16KB-page devices; verified by an ELF parser in `build-all.sh`. armv7 binaries are 4KB-page and skip both the flag and the check.
+arm64 native binaries require **16KB page alignment** (`-Wl,-z,max-page-size=16384`) - mandatory on Android 13+ 16KB-page devices; verified by an ELF parser in `build-all.sh`. armv7 and x86_64 binaries are 4KB-page and skip both the flag and the check. 32-bit x86 (i686) is **not** shipped: QEMU 11 removed 32-bit host support upstream.
 
 ## Architecture
 
@@ -162,7 +162,7 @@ Single-activity Compose app: `ui/navigation/NavGraph.kt` routes `setup → home 
 │       ├── res/values, res/values-zh/    # strings (EN + Chinese)
 │       ├── assets/                       # vmlinuz-virt, initrd.img, alpine-rootfs.squashfs (all gitignored, built locally),
 │       │                                 # qemu/, colors/ (122), fonts/ (13), ui-fonts/
-│       └── jniLibs/{arm64-v8a,armeabi-v7a}/   # native executables, one dir per ABI (see below)
+│       └── jniLibs/{arm64-v8a,armeabi-v7a,x86_64}/   # native executables, one dir per ABI (see below)
 ├── terminal-view/, terminal-emulator/   # vendored Termux fork (local Gradle modules)
 ├── init-podroid                         # initramfs bootstrap: overlay + switch_root
 ├── podroid-bridge.c                     # PTY <-> virtio-console relay -> libpodroid-bridge.so
@@ -170,7 +170,8 @@ Single-activity Compose app: `ui/navigation/NavGraph.kt` routes `setup → home 
 ├── Dockerfile                           # kernel + initramfs + QEMU build
 ├── build-tools/                         # static assets used during Docker builds
 │   ├── cross-android-aarch64.ini        # Meson cross-compilation config for aarch64-android26
-│   └── cross-android-armv7.ini          # Meson cross-compilation config for armv7a-androideabi26
+│   ├── cross-android-armv7.ini          # Meson cross-compilation config for armv7a-androideabi26
+│   └── cross-android-x86_64.ini         # Meson cross-compilation config for x86_64-linux-android26
 ├── build-rootfs/
 │   ├── Dockerfile.rootfs, build-rootfs.sh
 │   ├── vsock-agent/                     # podroid-vsock-agent.c (AVF control/forward agent)
@@ -180,9 +181,9 @@ Single-activity Compose app: `ui/navigation/NavGraph.kt` routes `setup → home 
 └── README.md, CONTRIBUTING.md, CREDITS.md
 ```
 
-## Native Binaries (`app/src/main/jniLibs/{arm64-v8a,armeabi-v7a}/`)
+## Native Binaries (`app/src/main/jniLibs/{arm64-v8a,armeabi-v7a,x86_64}/`)
 
-ELF executables renamed `.so` for APK packaging; run via `ProcessBuilder` / `TerminalSession`, not loaded as JNI libraries. Built **once per ABI** by the Dockerfile's `qemu-builder` stage (`build-all.sh qemu`); the guest kernel/initramfs/rootfs are aarch64 and shared across ABIs. The 16KB-page alignment requirement applies to **arm64 only** (Android 13+ 16KB-page devices); armv7 is always 4KB pages and gets no `max-page-size` flag. The arm64 build carries the PAC-safe sigsetjmp shim; armv7 uses libc's.
+ELF executables renamed `.so` for APK packaging; run via `ProcessBuilder` / `TerminalSession`, not loaded as JNI libraries. Built **once per ABI** by the Dockerfile's `qemu-builder` stage (`build-all.sh qemu`); the guest kernel/initramfs/rootfs are aarch64 and shared across ABIs. The 16KB-page alignment requirement applies to **arm64 only** (Android 13+ 16KB-page devices); armv7 and x86_64 are always 4KB pages and get no `max-page-size` flag. The arm64 build carries the PAC-safe sigsetjmp shim; armv7/x86_64 use libc's. 32-bit x86 (i686) is not supported because QEMU 11 removed 32-bit host support upstream.
 
 | File | What it is |
 |---|---|
@@ -203,7 +204,7 @@ The terminal emulator JNI is built from the vendored `terminal-emulator` module 
 
 ## Build pipelines
 
-- **`Dockerfile`** - custom Linux kernel (arm64 defconfig + `podroid_kernel.config` modules + `forced_builtin.config` forcing overlayfs / netfilter / bridge / veth / tun / FUSE / IPv6 etc. to `=y`) and QEMU cross-compiled against the NDK **per ABI** (`ARG ABI=arm64-v8a|armeabi-v7a`; `qemu-builder` stage builds one ABI per `docker build`, `build-all.sh qemu` runs it twice). A build-time check greps the resolved `.config` and **fails the build** if any critical option isn't `=y` (guards against silent Kconfig demotion from unmet tristate deps). QEMU needs `--enable-libusb` (for passthrough) and a few Android/Bionic patches; `build-all.sh qemu` may need `docker build --network=host`.
+- **`Dockerfile`** - custom Linux kernel (arm64 defconfig + `podroid_kernel.config` modules + `forced_builtin.config` forcing overlayfs / netfilter / bridge / veth / tun / FUSE / IPv6 etc. to `=y`) and QEMU cross-compiled against the NDK **per ABI** (`ARG ABI=arm64-v8a|armeabi-v7a|x86_64`; `qemu-builder` stage builds one ABI per `docker build`, `build-all.sh qemu` runs it three times). A build-time check greps the resolved `.config` and **fails the build** if any critical option isn't `=y` (guards against silent Kconfig demotion from unmet tristate deps). QEMU needs `--enable-libusb` (for passthrough) and a few Android/Bionic patches; `build-all.sh qemu` may need `docker build --network=host`.
 - **`build-rootfs/Dockerfile.rootfs`** - fetches the Alpine minirootfs, runs `build-rootfs.sh` (apk-installs alpine-base + openrc + podman + crun + fuse-overlayfs + docker + lxc + dropbear + iptables/nftables + bridge-utils, sets root password `podroid`, seals file caps on `newuidmap`/`newgidmap`, copies the OpenRC services and the cross-compiled `podroid-vsock-agent` + `podroid-hostd`, wires runlevels via direct symlinks), then `mksquashfs -comp zstd` (kernel ships `CONFIG_SQUASHFS_ZSTD=y`).
 
 ## Performance tuning (TCG path; KVM is impossible without root)
@@ -214,12 +215,12 @@ In `QemuEngine.buildCommand()`: `tcg,thread=multi`, larger `tb-size` for ≥2GB 
 
 - **`CONFIG_DEVTMPFS_MOUNT=y` pre-mounts `/dev` before `/init` runs.** `init-podroid` must use `mount ... || true` for the devtmpfs line — the kernel's pre-populated `/dev` is sufficient and a second `mount(2)` returns EBUSY. Also: `size=` is not valid for devtmpfs in kernels where it is ramfs-backed (causes EINVAL). Either failure exits util-linux with `MNT_EX_FAIL=32`; `set -e` propagates `exit(32)`, encoded as `exitcode=0x00002000` ("Attempted to kill init!"). Always keep the `|| true`.
 - **util-linux `mount` stops option parsing at the first non-option argument** when `POSIXLY_CORRECT` is set. Put `-o` flags *before* device and mountpoint (`mount -t proc -o noexec,nosuid,nodev proc /proc`), not after. Options placed after the mountpoint are silently dropped, causing `mount(2)` to be called with `flags=0` and returning EPERM — which util-linux prints as "must be superuser to use mount" even for root.
-- **`Dockerfile` heredoc gotcha.** Docker BuildKit's parser treats `[section]` lines inside `RUN ... << 'EOF'` heredocs as unknown Dockerfile instructions and aborts the parse. Instead of using shell heredocs in `RUN` for multi-line config files, use `COPY build-tools/<file>` from the build context. The Meson cross-compilation configs live in `build-tools/cross-android-aarch64.ini` + `build-tools/cross-android-armv7.ini` for this reason.
+- **`Dockerfile` heredoc gotcha.** Docker BuildKit's parser treats `[section]` lines inside `RUN ... << 'EOF'` heredocs as unknown Dockerfile instructions and aborts the parse. Instead of using shell heredocs in `RUN` for multi-line config files, use `COPY build-tools/<file>` from the build context. The Meson cross-compilation configs live in `build-tools/cross-android-aarch64.ini` + `build-tools/cross-android-armv7.ini` + `build-tools/cross-android-x86_64.ini` for this reason.
 - **Backend asymmetry is the #1 source of bugs.** QEMU = SLIRP + QMP + virtio-console (TTY); AVF = DHCP + vsock (raw sockets). Test both. The host bridge's `cfmakeraw` on hvc2 (above) is a concrete example.
 - **Boot detection** scans a rolling buffer, not per-read chunks (fast devices split markers).
 - **Bridge stderr is silenced** (`dup2(/dev/null, STDERR)`): it runs as a `TerminalSession` subprocess whose stderr IS the PTY. Never add `fprintf(stderr, ...)` to `podroid-bridge.c`.
 - **`forceUpdateSizeFromView` must not multiply by scaledDensity** - `TerminalView` passes the raw int textSize to `Paint`; mismatched math renders TUI apps in the wrong grid.
-- **SLIRP has no ICMP** (`ping` fails in the guest) and its DNS forwarder is unreliable on Android (resolv.conf uses public DNS).
+- **SLIRP has no ICMP** (`ping` fails in the guest) and its DNS forwarder is unreliable on Android — it resolves the host's resolv.conf, which doesn't exist on Android, so `podroid-network` writes **public DNS first** (8.8.8.8 / 1.1.1.1) and leaves SLIRP's 10.0.2.3 as a last resort; DNS queries flow straight through SLIRP's NAT.
 - **"Phone IP: unknown" does not mean the VM is offline.** The home/settings label comes from `NetworkUtils.localIpv4` — on IPv6-only cellular, VPN-only, or quirky vendor `ConnectivityManager`s it can miss; a `NetworkInterface` enumeration fallback now catches those. The VM's own connectivity is independent (SLIRP NATs outbound sockets), and `podroid-network` now prefers `udhcpc` against SLIRP's built-in DHCP with a static 10.0.2.15 fallback, so a missing app-side IP can't strand the guest.
 - **Privileged ports**: the app can't bind host ports < 1024 (no `CAP_NET_BIND_SERVICE`), so SSH is on 9922, not 22. Forward to a high host port.
 - **Reflection into the vendored Termux fork** (`mTermSession`, `mEmulator`, `mCurrentDecSetFlags`) is kept by `app/proguard-rules.pro`.

@@ -225,9 +225,10 @@ RUN wget -q https://dl.google.com/android/repository/android-ndk-r27c-linux.zip 
 #   SYSROOT_LIBDIR  sysroot lib dir to seed with our static shims
 #   CONFIG_HOST     autoconf --host triplet
 #   MESON_CROSS     meson cross file for glib/pixman
-#   UC_ARCH         libucontext arch (aarch64 / arm)
+#   UC_ARCH         libucontext arch (aarch64 / arm / x86_64)
 #   QEMU_ALIGN      -Wl,-z,max-page-size=16384 on arm64 only (mandatory on
-#                    Android 13+ 16KB-page devices; meaningless on 4KB 32-bit)
+#                    Android 13+ 16KB-page devices; meaningless on 4KB 32-bit
+#                    ARM / x86_64)
 #   EXTRA_ATOMIC    -latomic on armv7 (Bionic 64-bit atomics live in a lib)
 RUN case "$ABI" in \
       arm64-v8a) \
@@ -258,6 +259,23 @@ RUN case "$ABI" in \
         && echo 'export QEMU_ALIGN=' \
         && echo 'export EXTRA_ATOMIC=-latomic' \
         ;; \
+      x86_64) \
+        # Intel/AMD Android (ChromeOS, emulators). 4KB pages, 64-bit atomics
+        # live in libc. 32-bit x86 (i686) is NOT supported: QEMU 11 removed
+        # 32-bit host support upstream, so an i686 Android build cannot work.
+        echo 'export NDK=/opt/ndk' \
+        && echo 'export LLVM=/opt/ndk/toolchains/llvm/prebuilt/linux-x86_64' \
+        && echo 'export PREFIX=/opt/deps' \
+        && echo 'export CLANG=x86_64-linux-android26-clang' \
+        && echo 'export TARGET=x86_64-linux-android26' \
+        && echo 'export SYSROOT_LIBDIR=x86_64-linux-android' \
+        && echo 'export CONFIG_HOST=x86_64-linux-android' \
+        && echo 'export MESON_CROSS=/opt/cross-android-x86_64.ini' \
+        && echo 'export PKGCONFIG=x86_64-android-pkg-config' \
+        && echo 'export UC_ARCH=x86_64' \
+        && echo 'export QEMU_ALIGN=' \
+        && echo 'export EXTRA_ATOMIC=' \
+        ;; \
       *) echo "FATAL: unsupported ABI '$ABI'" >&2; exit 1 ;; \
     esac > /opt/abi.env \
     && printf 'export CC="${LLVM}/bin/${CLANG}"\nexport AR="${LLVM}/bin/llvm-ar"\nexport RANLIB="${LLVM}/bin/llvm-ranlib"\n' >> /opt/abi.env \
@@ -272,6 +290,7 @@ RUN . /opt/abi.env \
 
 COPY build-tools/cross-android-aarch64.ini /opt/cross-android-aarch64.ini
 COPY build-tools/cross-android-armv7.ini   /opt/cross-android-armv7.ini
+COPY build-tools/cross-android-x86_64.ini  /opt/cross-android-x86_64.ini
 
 # Deps (pcre2, libffi, libiconv, glib, pixman, libattr, libucontext)
 RUN . /opt/abi.env && wget -q https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.gz && tar xf pcre2-10.44.tar.gz && cd pcre2-10.44 && ./configure --host=${CONFIG_HOST} --prefix=${PREFIX} --enable-static --disable-shared CC="${CC}" && make -j$(nproc) install
@@ -284,7 +303,9 @@ RUN . /opt/abi.env && printf '#ifndef PODROID_ICONV_H\n#define PODROID_ICONV_H\n
     && ${AR} rcs ${PREFIX}/lib/libiconv.a /tmp/iconv_shim.o \
     && cp ${PREFIX}/lib/libiconv.a ${LLVM}/sysroot/usr/lib/${SYSROOT_LIBDIR}/26/libiconv.a
 RUN . /opt/abi.env && wget -q https://download.gnome.org/sources/glib/2.82/glib-2.82.5.tar.xz&& tar xf glib-2.82.5.tar.xz && cd glib-2.82.5 && meson setup _build --cross-file ${MESON_CROSS} --prefix ${PREFIX} --default-library static -Dselinux=disabled -Dlibmount=disabled && ninja -C _build install
-RUN . /opt/abi.env && wget -q https://cairographics.org/releases/pixman-0.44.2.tar.xz && tar xf pixman-0.44.2.tar.xz && cd pixman-0.44.2 && if [ "$ABI" = armeabi-v7a ]; then NEON_FLAG=""; else NEON_FLAG="-Da64-neon=disabled"; fi && meson setup _build --cross-file ${MESON_CROSS} --prefix ${PREFIX} --default-library static ${NEON_FLAG} && ninja -C _build install
+RUN . /opt/abi.env && wget -q https://cairographics.org/releases/pixman-0.44.2.tar.xz && tar xf pixman-0.44.2.tar.xz && cd pixman-0.44.2 && \
+    if [ "$ABI" = arm64-v8a ]; then NEON_FLAG="-Da64-neon=disabled"; else NEON_FLAG=""; fi && \
+    meson setup _build --cross-file ${MESON_CROSS} --prefix ${PREFIX} --default-library static ${NEON_FLAG} && ninja -C _build install
 RUN . /opt/abi.env && wget -q https://download.savannah.gnu.org/releases/attr/attr-2.5.2.tar.gz && tar xf attr-2.5.2.tar.gz && cd attr-2.5.2 && ./configure --host=${CONFIG_HOST} --prefix=${PREFIX} --enable-static --disable-shared CC="${CC}" && make -j$(nproc) install && cp ${PREFIX}/lib/libattr.a ${LLVM}/sysroot/usr/lib/${SYSROOT_LIBDIR}/26/libattr.a
 RUN . /opt/abi.env && git clone --depth=1 https://github.com/kaniini/libucontext.git /tmp/libucontext && make -C /tmp/libucontext ARCH=${UC_ARCH} CC="${CC}" EXPORT_UNPREFIXED=yes && install -Dm644 /tmp/libucontext/libucontext.a ${PREFIX}/lib/libucontext.a && install -Dm644 /tmp/libucontext/include/libucontext/libucontext.h ${PREFIX}/include/libucontext/libucontext.h && find /tmp/libucontext -name bits.h -path '*libucontext*' -exec install -Dm644 {} ${PREFIX}/include/libucontext/bits.h \; \
     && printf '#ifndef PODROID_UCONTEXT_SHIM_H\n#define PODROID_UCONTEXT_SHIM_H\n#include_next <ucontext.h>\n#include <libucontext/libucontext.h>\n#define getcontext libucontext_getcontext\n#define makecontext libucontext_makecontext\n#define setcontext libucontext_setcontext\n#define swapcontext libucontext_swapcontext\n#endif\n' > ${PREFIX}/include/ucontext.h
@@ -360,6 +381,7 @@ RUN sed -i 's@udev->speed = speed_map\[libusb_speed\];@udev->speed = speed_map[l
 RUN . /opt/abi.env && cd ${QEMU_DIR} && \
     JMPLIB=""; [ "$ABI" = arm64-v8a ] && JMPLIB="${PREFIX}/lib/libqemujmp.a"; \
     CPU_FLAG=""; [ "$ABI" = armeabi-v7a ] && CPU_FLAG="--cpu=arm"; \
+    [ "$ABI" = x86_64 ] && CPU_FLAG="--cpu=x86_64"; \
     ./configure --cc="${CC}" --cross-prefix="${LLVM}/bin/llvm-" --extra-cflags="-fPIC -DANDROID -include /opt/shm_shim.h -I${PREFIX}/include -I${PREFIX}/include/glib-2.0 -I${PREFIX}/lib/glib-2.0/include" --extra-ldflags="-L${PREFIX}/lib ${QEMU_ALIGN} ${EXTRA_ATOMIC} ${PREFIX}/lib/libucontext.a ${PREFIX}/lib/libshm.a ${JMPLIB}" --prefix=/opt/qemu-out --target-list=aarch64-softmmu --enable-tcg --enable-slirp --enable-virtfs --enable-libusb --enable-pie --disable-docs --disable-gtk --disable-sdl --disable-vnc --disable-vhost-user --disable-plugins --with-coroutine=ucontext ${CPU_FLAG} && make -j$(nproc) install
 
 # Bridge

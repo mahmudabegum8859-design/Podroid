@@ -10,8 +10,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # QEMU + native helpers are cross-built per ABI; the guest (kernel/initramfs/
 # rootfs) is aarch64 and shared. Keep this list in sync with the Dockerfile's
-# qemu-builder ABI case and app/build.gradle.kts ndk.abiFilters.
-ABIS=(arm64-v8a armeabi-v7a)
+# qemu-builder ABI case and app/build.gradle.kts ndk.abiFilters. x86_64 covers
+# Intel/AMD Android (ChromeOS, emulators); 32-bit x86 (i686) is NOT supported
+# because QEMU 11 removed 32-bit host support upstream.
+ABIS=(arm64-v8a armeabi-v7a x86_64)
 JNILIBS="${SCRIPT_DIR}/app/src/main/jniLibs"
 ASSETS="${SCRIPT_DIR}/app/src/main/assets"
 
@@ -163,7 +165,8 @@ build_qemu() {
         docker rm "podroid-qemu-extract-${abi}" >/dev/null
 
         # 16KB page alignment is an arm64 requirement (Android 13+ 16KB-page
-        # devices). 32-bit ARM is always 4KB pages — no flag, no check.
+        # devices). 32-bit ARM and x86_64 Android are always 4KB pages — no
+        # flag, no check.
         if [ "$abi" = arm64-v8a ]; then
             verify_16kb_align "$out/libqemu-system-aarch64.so"
         fi

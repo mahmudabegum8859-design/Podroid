@@ -16,7 +16,7 @@ You will need:
 - **Docker 20.10+** for the kernel, initramfs, rootfs, and QEMU build pipelines
 - **Android NDK r27c** for the bridge and Termux native libraries
 - **Android SDK** with platform 36 + build-tools
-- An **arm64-v8a or armeabi-v7a Android device** running **Android 8.0+ (API 26)** for testing (the VM guest is aarch64 on both; 64-bit is the primary target)
+- An **arm64-v8a, armeabi-v7a, or x86_64 Android device** running **Android 8.0+ (API 26)** for testing (the VM guest is aarch64 on all of them; 64-bit ARM is the primary target)
 
 ## Build pipeline
 
@@ -59,7 +59,7 @@ adb shell run-as com.excp.podroid.debug cat files/console.log
 
 1. Fork the repository and create a topic branch (`fix/issue-42`, `feature/whatever`).
 2. Keep pull requests focused: one fix or one feature per PR.
-3. Test on a real arm64-v8a device before submitting (and ideally an armeabi-v7a one for the 32-bit path). Emulators do not exercise the QEMU + native binary path the way real hardware does.
+3. Test on a real arm64-v8a device before submitting (and ideally an armeabi-v7a one for the 32-bit path, plus x86_64 for ChromeOS/emulators). Emulators do not exercise the QEMU + native binary path the way real hardware does.
 4. If your change is user-facing, update [`README.md`](README.md). If it changes the architecture, boot pipeline, terminal layer, or kernel options, update [`CLAUDE.md`](CLAUDE.md) too.
 5. Match the existing code style of the file you are editing.
 
@@ -74,7 +74,7 @@ Podroid/
 │       │   ├── service/                  Foreground service + boot-stage notification
 │       │   ├── data/repository/          DataStore-backed settings & port forwards
 │       │   └── ui/                       Compose screens + theme
-│       ├── jniLibs/{arm64-v8a,armeabi-v7a}/   QEMU, podroid-bridge, libslirp (per ABI)
+│       ├── jniLibs/{arm64-v8a,armeabi-v7a,x86_64}/   QEMU, podroid-bridge, libslirp (per ABI)
 │       └── assets/                       kernel, initramfs, squashfs, fonts, themes
 ├── init-podroid                          Minimal initramfs script (~45 lines)
 ├── podroid-bridge.c                      Native PTY ↔ virtio-console relay

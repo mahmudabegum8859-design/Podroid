@@ -32,7 +32,7 @@ start() {
     mountpoint -q /dev/pts    || mount -t devpts devpts /dev/pts \
         -o gid=5,mode=0620,ptmxmode=0666,noexec,nosuid
     mountpoint -q /dev/shm    || mount -t tmpfs tmpfs /dev/shm \
-        -o noexec,nosuid,nodev,size=64m
+        -o noexec,nosuid,nodev,size=256m
     mountpoint -q /dev/mqueue || mount -t mqueue mqueue /dev/mqueue \
         -o noexec,nosuid,nodev
     [ -c /dev/ptmx ] || mknod /dev/ptmx c 5 2 2>/dev/null

@@ -2,9 +2,10 @@
  * Podroid - Rootless Podman for Android
  * Copyright (C) 2024-2026 Podroid contributors
  *
- * Tiny shared helper for resolving the device's primary IPv4 address.
- * Used by both PodroidService (when launching QEMU) and the Settings UI
- * (to display "Phone IP: …" next to port-forward rules).
+ * Tiny shared helper for resolving the device's primary IP address (IPv4
+ * preferred, global IPv6 as a last resort). Used by both PodroidService (when
+ * launching QEMU) and the Settings/Home UI (to display "Phone IP: …" next to
+ * port-forward rules).
  */
 package com.excp.podroid.util
 
@@ -19,7 +20,7 @@ object NetworkUtils {
      * The address users would `ssh root@<this> -p 9922` to, from another
      * device on the same LAN.
      *
-     * Strategy (two layers so "unknown" is a last resort, not a common case):
+     * Strategy (three layers so "unknown" is a last resort, not a common case):
      *
      * 1. ConnectivityManager, picked by transport preference rather than by
      *    address-pattern matching: WiFi first (LAN), then Ethernet (USB-C
@@ -30,6 +31,9 @@ object NetworkUtils {
      * 2. If that finds nothing (IPv6-only default route, VPN-only, airplane
      *    mode + tethering, or a vendor ConnectivityManager that lies), fall
      *    back to enumerating `NetworkInterface`s directly for any usable IPv4.
+     *
+     * 3. If there is no usable IPv4 at all (IPv6-only cellular w/o CLAT, etc.),
+     *    return a routable global IPv6 instead of "unknown".
      */
     fun localIpv4(context: Context): String {
         val cm = try {
@@ -38,7 +42,13 @@ object NetworkUtils {
             null
         }
         cm?.let { firstIpv4ByTransportPreference(it) }?.let { return it }
-        return firstUsableInterfaceIpv4() ?: "unknown"
+        firstUsableInterfaceIpv4()?.let { return it }
+        // No IPv4 anywhere (IPv6-only cellular, VPN-only, airplane-mode
+        // tethering). Return a global IPv6 rather than "unknown" — the label
+        // is "Phone IP" and a routable v6 address is far more useful than
+        // "unknown" to anyone trying to reach the VM/SSH.
+        firstUsableInterfaceIpv6()?.let { return it }
+        return "unknown"
     }
 
     private val TRANSPORT_PREFERENCE = intArrayOf(
@@ -94,6 +104,47 @@ object NetworkUtils {
      */
     private fun firstUsableInterfaceIpv4(): String? = try {
         val addrs = mutableListOf<Inet4Address>()
+        walkUpInterfaces { addr ->
+            if (addr is Inet4Address &&
+                !addr.isLoopbackAddress &&
+                !addr.isAnyLocalAddress &&
+                !addr.isLinkLocalAddress
+            ) {
+                addrs += addr
+            }
+        }
+        addrs.firstOrNull { it.isSiteLocalAddress }?.hostAddress
+            ?: addrs.firstOrNull()?.hostAddress
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * Same scan for global IPv6 (used only when no IPv4 exists at all). Skips
+     * link-local (fe80::/10, which is unscoped-routing garbage outside the
+     * link) and the deprecated site-local range; whatever is left is a
+     * routable global address.
+     */
+    private fun firstUsableInterfaceIpv6(): String? = try {
+        var best: java.net.Inet6Address? = null
+        walkUpInterfaces { addr ->
+            if (addr is java.net.Inet6Address &&
+                !addr.isLoopbackAddress &&
+                !addr.isAnyLocalAddress &&
+                !addr.isLinkLocalAddress &&
+                !addr.isSiteLocalAddress &&
+                !addr.isMulticastAddress
+            ) {
+                best = addr
+            }
+        }
+        best?.hostAddress
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Enumerates up interfaces, skipping tunnels/virtuals, invoking [visit] per address. */
+    private fun walkUpInterfaces(visit: (java.net.InetAddress) -> Unit) {
         val ifaces = NetworkInterface.getNetworkInterfaces()
         while (ifaces.hasMoreElements()) {
             val ni = ifaces.nextElement()
@@ -102,18 +153,8 @@ object NetworkUtils {
             // Tunnels/virtuals aren't LAN endpoints the user can SSH to.
             if (name.startsWith("tun") || name.startsWith("ppp") || name == "dummy0") continue
             for (addr in ni.inetAddresses) {
-                if (addr is Inet4Address &&
-                    !addr.isLoopbackAddress &&
-                    !addr.isAnyLocalAddress &&
-                    !addr.isLinkLocalAddress
-                ) {
-                    addrs += addr
-                }
+                visit(addr)
             }
         }
-        addrs.firstOrNull { it.isSiteLocalAddress }?.hostAddress
-            ?: addrs.firstOrNull()?.hostAddress
-    } catch (_: Exception) {
-        null
     }
 }
