@@ -67,17 +67,19 @@ jobs:
       - name: Build native components (kernel, rootfs, QEMU)
         run: ./build-all.sh all
 
+      # NOTE: the secrets context is not valid inside step-level `if:` — GitHub
+      # rejects the file with "Unrecognized named-value: 'secrets'". Check it in
+      # bash instead (secrets ARE available inside run: steps).
       - name: Decode release keystore
-        if: secrets.PODROID_RELEASE_KEYSTORE_B64 != ''
+        shell: bash
         run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.PODROID_RELEASE_KEYSTORE_B64 }}" ]; then
+            echo "::error::Release signing secrets are missing. Add PODROID_RELEASE_KEYSTORE_B64 (base64 of the .jks), PODROID_RELEASE_STORE_PASSWORD, PODROID_RELEASE_KEY_ALIAS and PODROID_RELEASE_KEY_PASSWORD as repo secrets, then re-run."
+            exit 1
+          fi
           mkdir -p "$RUNNER_TEMP/keystore"
           echo "${{ secrets.PODROID_RELEASE_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/keystore/podroid-release.jks"
-
-      - name: Fail when signing secrets are missing
-        if: secrets.PODROID_RELEASE_KEYSTORE_B64 == ''
-        run: |
-          echo "::error::Release signing secrets are missing. Add PODROID_RELEASE_KEYSTORE_B64 (base64 of the .jks), PODROID_RELEASE_STORE_PASSWORD, PODROID_RELEASE_KEY_ALIAS and PODROID_RELEASE_KEY_PASSWORD as repo secrets, then re-run."
-          exit 1
 
       - name: Build signed release APK
         run: ./gradlew assembleRelease
