@@ -17,7 +17,8 @@ android {
         }
 
         ndk {
-            abiFilters += "arm64-v8a"
+            // The terminal JNI must exist for every ABI the app ships.
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
     }
 

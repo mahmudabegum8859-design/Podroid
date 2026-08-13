@@ -8,7 +8,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-JNILIBS="${SCRIPT_DIR}/app/src/main/jniLibs/arm64-v8a"
+# QEMU + native helpers are cross-built per ABI; the guest (kernel/initramfs/
+# rootfs) is aarch64 and shared. Keep this list in sync with the Dockerfile's
+# qemu-builder ABI case and app/build.gradle.kts ndk.abiFilters.
+ABIS=(arm64-v8a armeabi-v7a)
+JNILIBS="${SCRIPT_DIR}/app/src/main/jniLibs"
 ASSETS="${SCRIPT_DIR}/app/src/main/assets"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
@@ -35,7 +39,7 @@ Commands:
   kernel        Build custom kernel only (podroid_kernel.config + Linux source)
   initramfs     Build custom kernel + Alpine VM initramfs (vmlinuz + initrd)
   rootfs        Build Alpine rootfs squashfs (alpine-rootfs.squashfs)
-  qemu          Build QEMU + podroid-bridge + podroid-launcher
+  qemu          Build QEMU + podroid-bridge + podroid-launcher (both ABIs)
   apk           Build the Android APK (also builds libtermux.so via Gradle NDK)
   deploy        Build APK, uninstall old version, and install to device
   test          Perform full build, install, and automated boot validation
@@ -135,26 +139,37 @@ build_rootfs() {
 build_qemu() {
     local qemu_ver
     qemu_ver=$(grep -E '^podroidQemuVersion=' "${SCRIPT_DIR}/gradle.properties" | cut -d= -f2)
-    log "Building QEMU ${qemu_ver} for Android ARM64 (Docker)..."
-    
-    docker build --build-arg "QEMU_VERSION=${qemu_ver}" \
-        -t podroid-qemu-builder --target final "${SCRIPT_DIR}"
-        
-    log "Extracting QEMU artifacts..."
-    docker rm -f podroid-qemu-extract 2>/dev/null || true
-    docker create --name podroid-qemu-extract podroid-qemu-builder /bin/true
-    
-    mkdir -p "$JNILIBS" "$ASSETS/qemu/keymaps"
-    docker cp podroid-qemu-extract:/libqemu-system-aarch64.so "$JNILIBS/"
-    docker cp podroid-qemu-extract:/libslirp.so               "$JNILIBS/"
-    docker cp podroid-qemu-extract:/libpodroid-bridge.so      "$JNILIBS/"
-    docker cp podroid-qemu-extract:/libpodroid-launcher.so    "$JNILIBS/"
-    docker cp podroid-qemu-extract:/qemu/efi-virtio.rom        "$ASSETS/qemu/"
-    docker cp podroid-qemu-extract:/qemu/keymaps/.             "$ASSETS/qemu/keymaps/"
-    docker rm podroid-qemu-extract >/dev/null
-    
-    verify_16kb_align "$JNILIBS/libqemu-system-aarch64.so"
-    success "QEMU and bridge ready."
+    mkdir -p "$ASSETS/qemu/keymaps"
+    for abi in "${ABIS[@]}"; do
+        log "Building QEMU ${qemu_ver} for Android ${abi} (Docker)..."
+        docker build --build-arg "QEMU_VERSION=${qemu_ver}" --build-arg "ABI=${abi}" \
+            -t "podroid-qemu-builder-${abi}" --target qemu-builder "${SCRIPT_DIR}"
+
+        log "Extracting ${abi} artifacts..."
+        docker rm -f "podroid-qemu-extract-${abi}" 2>/dev/null || true
+        docker create --name "podroid-qemu-extract-${abi}" "podroid-qemu-builder-${abi}" /bin/true
+
+        local out="$JNILIBS/$abi"
+        mkdir -p "$out"
+        docker cp "podroid-qemu-extract-${abi}:/libqemu-system-aarch64.so" "$out/"
+        docker cp "podroid-qemu-extract-${abi}:/libslirp.so"               "$out/"
+        docker cp "podroid-qemu-extract-${abi}:/libpodroid-bridge.so"      "$out/"
+        docker cp "podroid-qemu-extract-${abi}:/libpodroid-launcher.so"    "$out/"
+        # Shared (ABI-independent) QEMU data files — copy once from the first ABI.
+        if [ "$abi" = "${ABIS[0]}" ]; then
+            docker cp "podroid-qemu-extract-${abi}:/qemu/efi-virtio.rom"        "$ASSETS/qemu/"
+            docker cp "podroid-qemu-extract-${abi}:/qemu/keymaps/."             "$ASSETS/qemu/keymaps/"
+        fi
+        docker rm "podroid-qemu-extract-${abi}" >/dev/null
+
+        # 16KB page alignment is an arm64 requirement (Android 13+ 16KB-page
+        # devices). 32-bit ARM is always 4KB pages — no flag, no check.
+        if [ "$abi" = arm64-v8a ]; then
+            verify_16kb_align "$out/libqemu-system-aarch64.so"
+        fi
+        success "${abi} QEMU and bridge ready."
+    done
+    success "QEMU and bridge ready for: ${ABIS[*]}"
 }
 
 build_apk() {
@@ -262,7 +277,10 @@ case "$1" in
     clean)
         log "Cleaning up..."
         ./gradlew clean
-        docker rmi podroid-builder podroid-qemu-builder podroid-rootfs:latest 2>/dev/null || true
+        docker rmi podroid-builder podroid-rootfs:latest 2>/dev/null || true
+        for abi in "${ABIS[@]}"; do
+            docker rmi "podroid-qemu-builder-${abi}" 2>/dev/null || true
+        done
         success "Cleaned."
         ;;
     *)

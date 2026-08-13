@@ -47,10 +47,22 @@ start() {
             return 1
         fi
     else
-        # QEMU/TCG backend: SLIRP's built-in DHCP also exists but hardcoding
-        # is faster + matches every existing user's setup. Original behavior.
-        ip addr add 10.0.2.15/24 dev "$NETIF" 2>/dev/null
-        ip route add default via 10.0.2.2 dev "$NETIF" 2>/dev/null
+        # QEMU/TCG backend: SLIRP runs its own DHCP server at 10.0.2.2 (leases
+        # 10.0.2.15) and DNS at 10.0.2.3. Prefer udhcpc — it configures the
+        # address, default route AND resolv.conf atomically and self-heals if
+        # the link is re-created. Fall back to the historical static config
+        # only when the DHCP client is missing or the server never answers
+        # (some host firewalls block the BOOTP exchange).
+        if command -v udhcpc >/dev/null 2>&1; then
+            udhcpc -i "$NETIF" -t 8 -T 1 -A 1 -q -f -n 2>/dev/null || true
+        fi
+        if ! ip -o -4 addr show dev "$NETIF" 2>/dev/null | grep -q 'inet '; then
+            ip addr add 10.0.2.15/24 dev "$NETIF" 2>/dev/null
+        fi
+        # DHCP or static, make sure the SLIRP gateway route exists (idempotent).
+        ip route add default via 10.0.2.2 dev "$NETIF" 2>/dev/null || true
+        # Belt-and-suspenders DNS: SLIRP's forwarder first, public resolvers as
+        # fallbacks (busybox udhcpc scripts vary in whether they write resolv.conf).
         printf 'nameserver 10.0.2.3\nnameserver 8.8.8.8\nnameserver 1.1.1.1\n' \
             > /etc/resolv.conf
         # Mirror the AVF post-check: if the static assignment didn't stick

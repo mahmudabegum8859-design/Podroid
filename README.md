@@ -13,7 +13,8 @@ A real Alpine Linux VM with its own kernel - not a chroot or proot trick - so **
 [![Stars](https://img.shields.io/github/stars/ExTV/Podroid?style=flat-square&color=yellow)](https://github.com/ExTV/Podroid/stargazers)
 [![License](https://img.shields.io/github/license/ExTV/Podroid?style=flat-square)](LICENSE)
 ![Android 8+](https://img.shields.io/badge/Android-8%2B-3DDC84?style=flat-square&logo=android&logoColor=white)
-![arm64](https://img.shields.io/badge/arch-arm64-orange?style=flat-square)
+![arm64-v8a](https://img.shields.io/badge/arch-arm64--v8a-red?style=flat-square)
+![armeabi-v7a](https://img.shields.io/badge/arch-armv7-orange?style=flat-square)
 
 [**Website**](https://extv.github.io/Podroid/) · [**Documentation**](https://extv.github.io/Podroid/guide/) · [**Download APK**](https://github.com/ExTV/Podroid/releases/latest)
 
@@ -35,7 +36,7 @@ A real Alpine Linux VM with its own kernel - not a chroot or proot trick - so **
 - **In-app terminal** - full xterm-256color, 122 color themes, 13 fonts, live resize
 - **X11 desktop** - run GUI Linux apps in a built-in viewer with touch, keyboard, mouse and audio
 - **USB passthrough**, **SSH**, **port forwarding** and a **guest-to-Android bridge**
-- **English and 中文**, no root, any arm64 device on Android 8+
+- **English and 中文**, no root, arm64-v8a **and armeabi-v7a (32-bit ARM)** devices on Android 8+ (the guest VM is always aarch64)
 
 ## Quick start
 

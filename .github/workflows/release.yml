@@ -1,0 +1,107 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Podroid release build
+#
+# Builds the full APK in CI (kernel + initramfs + Alpine rootfs + QEMU via
+# Docker, then the signed release APK via Gradle) and attaches it to a GitHub
+# release. Run it by pushing a `v*` tag (e.g. `v1.3.0`) or manually via the
+# Actions tab (Actions → Build & Release APK → Run workflow).
+#
+# The APK is a single **universal** build containing native binaries for both
+# ABIs (arm64-v8a + armeabi-v7a); `build-all.sh qemu` cross-compiles QEMU once
+# per ABI inside Docker. The first run compiles two QEMU builds (~2-3 h),
+# after which Docker layer caches make re-runs cheap.
+#
+# Before releasing, bump `versionCode` / `versionName` in app/build.gradle.kts
+# (monotonic versionCode is required for in-place installs — CLAUDE.md:
+# "Persistence is sacred"). Then configure these repo secrets, or the job
+# fails with a clear message:
+#   PODROID_RELEASE_KEYSTORE_B64    base64 of the release keystore (.jks)
+#   PODROID_RELEASE_STORE_PASSWORD  keystore password
+#   PODROID_RELEASE_KEY_ALIAS       key alias
+#   PODROID_RELEASE_KEY_PASSWORD    key password
+# The keystore must be the same one used for previous releases (same signing
+# key, or Android will refuse to install over older builds).
+# ─────────────────────────────────────────────────────────────────────────────
+name: Build & Release APK
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (e.g. v1.2.7)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install platform, build-tools and NDK
+        run: |
+          sdkmanager --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.2.12479018" \
+            --sdk_root="$ANDROID_HOME"
+
+      # Kernel + initramfs + Alpine rootfs + QEMU (Docker) + debug APK.
+      # First run compiles QEMU from source (~30-60 min); Docker layer caches
+      # make re-runs cheap. `--fast` skips QEMU when binaries already exist.
+      - name: Build native components (kernel, rootfs, QEMU)
+        run: ./build-all.sh all
+
+      - name: Decode release keystore
+        if: secrets.PODROID_RELEASE_KEYSTORE_B64 != ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/keystore"
+          echo "${{ secrets.PODROID_RELEASE_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/keystore/podroid-release.jks"
+
+      - name: Fail when signing secrets are missing
+        if: secrets.PODROID_RELEASE_KEYSTORE_B64 == ''
+        run: |
+          echo "::error::Release signing secrets are missing. Add PODROID_RELEASE_KEYSTORE_B64 (base64 of the .jks), PODROID_RELEASE_STORE_PASSWORD, PODROID_RELEASE_KEY_ALIAS and PODROID_RELEASE_KEY_PASSWORD as repo secrets, then re-run."
+          exit 1
+
+      - name: Build signed release APK
+        run: ./gradlew assembleRelease
+        env:
+          ORG_GRADLE_PROJECT_PODROID_RELEASE_STORE_FILE: ${{ runner.temp }}/keystore/podroid-release.jks
+          ORG_GRADLE_PROJECT_PODROID_RELEASE_STORE_PASSWORD: ${{ secrets.PODROID_RELEASE_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_PODROID_RELEASE_KEY_ALIAS: ${{ secrets.PODROID_RELEASE_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_PODROID_RELEASE_KEY_PASSWORD: ${{ secrets.PODROID_RELEASE_KEY_PASSWORD }}
+
+      - name: Verify APK signature
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: podroid-release
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: Podroid ${{ github.event.inputs.tag || github.ref_name }}
+          files: app/build/outputs/apk/release/app-release.apk
+          generate_release_notes: true
