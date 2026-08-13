@@ -376,7 +376,7 @@ RUN sed -i 's@^    rc = libusb_init(&ctx);@#if defined(__ANDROID__)\n    libusb_
 # low-speed. The guest kernel then rejects any device whose ep0 maxpacket isn't
 # 8 ("Invalid ep0 maxpacket: 64" + endless power-cycle). Derive a consistent
 # speed from the real device descriptor instead (9 = USB3 -> super, else full).
-RUN sed -i 's@udev->speed = speed_map\[libusb_speed\];@udev->speed = speed_map[libusb_speed];\n    /* Podroid: libusb_wrap_sys_device() reports LIBUSB_SPEED_UNKNOWN when the\n     * host kernel's USBDEVFS_GET_SPEED ioctl fails on Android; speed_map[] has\n     * no UNKNOWN entry, so it falls to speed_map[0] == USB_SPEED_LOW and every\n     * wrapped device is presented low-speed (guest rejects ep0 != 8). */\n    if (udev->speed == USB_SPEED_LOW \&\& s->ddesc.bMaxPacketSize0 != 8) {\n        udev->speed = (s->ddesc.bMaxPacketSize0 == 9) ? USB_SPEED_SUPER : USB_SPEED_FULL;\n    }@' ${QEMU_DIR}/hw/usb/host-libusb.c \
+RUN sed -i 's@udev->speed = speed_map\[libusb_speed\];@udev->speed = speed_map[libusb_speed];\n    /* Podroid: libusb_wrap_sys_device() reports LIBUSB_SPEED_UNKNOWN when the\n     * host kernel USBDEVFS_GET_SPEED ioctl fails on Android; speed_map[] has\n     * no UNKNOWN entry, so it falls to speed_map[0] == USB_SPEED_LOW and every\n     * wrapped device is presented low-speed (guest rejects ep0 != 8). */\n    if (udev->speed == USB_SPEED_LOW \&\& s->ddesc.bMaxPacketSize0 != 8) {\n        udev->speed = (s->ddesc.bMaxPacketSize0 == 9) ? USB_SPEED_SUPER : USB_SPEED_FULL;\n    }@' ${QEMU_DIR}/hw/usb/host-libusb.c \
     && grep -q "USBDEVFS_GET_SPEED ioctl fails on Android" ${QEMU_DIR}/hw/usb/host-libusb.c
 
 RUN . /opt/abi.env && cd ${QEMU_DIR} && \

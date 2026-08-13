@@ -30,6 +30,41 @@ warn() { printf "${YELLOW}WARNING:${NC} %s\n" "$*"; }
 error() { printf "${RED}ERROR:${NC} %s\n" "$*"; exit 1; }
 success() { printf "${GREEN}SUCCESS:${NC} %s\n" "$*"; }
 
+# ── Docker invocation ────────────────────────────────────────────────────────
+# Locally we use plain `docker build` (BuildKit, no driver setup needed). In
+# CI (GitHub Actions, detected via the CI env var that every workflow sets) we
+# route through `docker buildx build` with the GHA layer cache so re-runs are
+# cheap instead of rebuilding the kernel/rootfs/QEMU from scratch. The GHA
+# cache backend is NOT supported by the default docker driver, so the workflow
+# creates a docker-container builder first (see .github/workflows/release.yml:
+# `docker/setup-buildx-action` with `driver: docker-container`). The container
+# driver also does not load `-t` images into the daemon, so image-target builds
+# go through docker_build_load() which adds `--load` (later steps extract
+# artifacts with `docker create`/`docker cp`).
+docker_build() {
+    if [ "${CI:-false}" = "true" ]; then
+        docker buildx build \
+            --allow network.host \
+            --cache-from type=gha,scope=podroid \
+            --cache-to type=gha,mode=max,scope=podroid \
+            "$@"
+    else
+        docker build "$@"
+    fi
+}
+docker_build_load() {
+    if [ "${CI:-false}" = "true" ]; then
+        docker buildx build \
+            --allow network.host \
+            --cache-from type=gha,scope=podroid \
+            --cache-to type=gha,mode=max,scope=podroid \
+            --load \
+            "$@"
+    else
+        docker build "$@"
+    fi
+}
+
 # ── Help ──────────────────────────────────────────────────────────────────────
 show_help() {
     cat <<EOF
@@ -97,7 +132,7 @@ build_kernel() {
     local kernel_ver
     kernel_ver=$(grep -E '^podroidKernelVersion=' "${SCRIPT_DIR}/gradle.properties" | cut -d= -f2)
     log "Building custom kernel ${kernel_ver} for aarch64 (Docker)..."
-    docker build --network=host \
+    docker_build_load --network=host \
         --build-arg "KERNEL_VERSION=${kernel_ver}" \
         -t podroid-kernel-builder --target kernel-builder "$SCRIPT_DIR"
     log "Extracting kernel artifact..."
@@ -113,7 +148,7 @@ build_initramfs() {
     local kernel_ver
     kernel_ver=$(grep -E '^podroidKernelVersion=' "${SCRIPT_DIR}/gradle.properties" | cut -d= -f2)
     log "Building custom kernel + Alpine Initramfs (Docker)..."
-    docker build --network=host \
+    docker_build_load --network=host \
         --build-arg "KERNEL_VERSION=${kernel_ver}" \
         -t podroid-builder --target packer "$SCRIPT_DIR"
 
@@ -131,7 +166,7 @@ build_rootfs() {
     log "Building Alpine rootfs squashfs..."
     local sysver
     sysver=$(grep -E '^[[:space:]]*versionCode[[:space:]]*=' "${SCRIPT_DIR}/app/build.gradle.kts" | grep -oE '[0-9]+' | head -1)
-    docker build -f "${SCRIPT_DIR}/build-rootfs/Dockerfile.rootfs" \
+    docker_build -f "${SCRIPT_DIR}/build-rootfs/Dockerfile.rootfs" \
         -t podroid-rootfs:latest \
         --build-arg "SYSTEM_VERSION=${sysver:-0}" \
         --output type=local,dest="${ASSETS}" \
@@ -145,7 +180,7 @@ build_qemu() {
     mkdir -p "$ASSETS/qemu/keymaps"
     for abi in "${ABIS[@]}"; do
         log "Building QEMU ${qemu_ver} for Android ${abi} (Docker)..."
-        docker build --build-arg "QEMU_VERSION=${qemu_ver}" --build-arg "ABI=${abi}" \
+        docker_build_load --build-arg "QEMU_VERSION=${qemu_ver}" --build-arg "ABI=${abi}" \
             -t "podroid-qemu-builder-${abi}" --target qemu-builder "${SCRIPT_DIR}"
 
         log "Extracting ${abi} artifacts..."

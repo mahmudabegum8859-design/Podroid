@@ -9,21 +9,30 @@
 # The APK is a single **universal** build containing native binaries for all
 # ABIs (arm64-v8a + armeabi-v7a + x86_64); `build-all.sh qemu` cross-compiles
 # QEMU once per ABI inside Docker. The first run compiles three QEMU builds
-# (~3-4 h), after which Docker layer caches make re-runs cheap. QEMU is
-# pinned to the 10.2 series (gradle.properties) because QEMU 11 dropped
-# 32-bit host support; armeabi-v7a cannot build against 11.x. 32-bit x86
-# (i686) is not shipped.
+# (~3-4 h); builds go through `docker buildx build` with the GHA layer cache
+# (docker-container driver, see the setup step below), so later runs reuse
+# the cached kernel/rootfs/QEMU layers and are cheap. QEMU is pinned to the
+# 10.2 series (gradle.properties) because QEMU 11 dropped 32-bit host
+# support; armeabi-v7a cannot build against 11.x. 32-bit x86 (i686) is not
+# shipped.
 #
 # Before releasing, bump `versionCode` / `versionName` in app/build.gradle.kts
 # (monotonic versionCode is required for in-place installs — CLAUDE.md:
-# "Persistence is sacred"). Then configure these repo secrets, or the job
-# fails with a clear message:
+# "Persistence is sacred").
+#
+# Signing: if these four repo secrets are set, the APK is signed with that
+# keystore:
 #   PODROID_RELEASE_KEYSTORE_B64    base64 of the release keystore (.jks)
 #   PODROID_RELEASE_STORE_PASSWORD  keystore password
 #   PODROID_RELEASE_KEY_ALIAS       key alias
 #   PODROID_RELEASE_KEY_PASSWORD    key password
-# The keystore must be the same one used for previous releases (same signing
-# key, or Android will refuse to install over older builds).
+# If they are missing (e.g. first release), the job generates a bootstrap
+# keystore in the runner and signs with it so the release still ships — but
+# that key is unique to this run, so a LATER release signed with a different
+# key will not install over this one (Android refuses signature mismatches).
+# Set the four secrets to the same keystore before the next release, or users
+# must uninstall first. The keystore must stay the same across releases (same
+# signing key, or Android will refuse to install over older builds).
 # ─────────────────────────────────────────────────────────────────────────────
 name: Build & Release APK
 
@@ -73,33 +82,61 @@ jobs:
         with:
           platforms: arm64
 
+      # Build via buildx with the GHA layer cache (scope=podroid) so re-runs
+      # reuse layers instead of rebuilding kernel/rootfs/QEMU from scratch on
+      # every fresh runner. The GHA cache backend is not supported by the
+      # default docker driver, so use the docker-container driver. Host
+      # networking (driver network=host) is required because build-all.sh
+      # builds the kernel/initramfs with `--network=host`.
+      - name: Set up buildx with GHA layer cache
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          driver-opts: |
+            network=host
+
       # Kernel + initramfs + Alpine rootfs + QEMU (Docker) + debug APK.
-      # First run compiles QEMU from source (~30-60 min); Docker layer caches
-      # make re-runs cheap. `--fast` skips QEMU when binaries already exist.
+      # First run compiles QEMU from source (~3-4 h); buildx + the GHA layer
+      # cache (scope=podroid) make later runs reuse the cached layers.
       - name: Build native components (kernel, rootfs, QEMU)
         run: ./build-all.sh all
 
-      # NOTE: the secrets context is not valid inside step-level `if:` — GitHub
-      # rejects the file with "Unrecognized named-value: 'secrets'". Check it in
-      # bash instead (secrets ARE available inside run: steps).
-      - name: Decode release keystore
+      # Prepare the release keystore. Prefer the four PODROID_RELEASE_* repo
+      # secrets (same key every release -> in-place upgrades work). If they are
+      # missing, generate a bootstrap keystore for this run so the release can
+      # still ship (v1.0.0), and warn loudly that the NEXT release needs the
+      # same key. Secrets are available inside `run:` steps (the secrets context
+      # is not valid inside step-level `if:`, so this is a bash check).
+      - name: Prepare release keystore
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${{ secrets.PODROID_RELEASE_KEYSTORE_B64 }}" ]; then
-            echo "::error::Release signing secrets are missing. Add PODROID_RELEASE_KEYSTORE_B64 (base64 of the .jks), PODROID_RELEASE_STORE_PASSWORD, PODROID_RELEASE_KEY_ALIAS and PODROID_RELEASE_KEY_PASSWORD as repo secrets, then re-run."
-            exit 1
-          fi
           mkdir -p "$RUNNER_TEMP/keystore"
-          echo "${{ secrets.PODROID_RELEASE_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/keystore/podroid-release.jks"
+          if [ -n "${{ secrets.PODROID_RELEASE_KEYSTORE_B64 }}" ]; then
+            echo "${{ secrets.PODROID_RELEASE_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/keystore/podroid-release.jks"
+            echo "PODROID_RELEASE_STORE_PASSWORD=${{ secrets.PODROID_RELEASE_STORE_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "PODROID_RELEASE_KEY_ALIAS=${{ secrets.PODROID_RELEASE_KEY_ALIAS }}" >> "$GITHUB_ENV"
+            echo "PODROID_RELEASE_KEY_PASSWORD=${{ secrets.PODROID_RELEASE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Release signing secrets are NOT set. Generating a one-off bootstrap keystore for this run. Future releases signed with a different key will NOT install over this one (signature mismatch) — set the four PODROID_RELEASE_* repo secrets to the same keystore before the next release, or users must uninstall first."
+            STORE_PASS="$(openssl rand -hex 16)"
+            KEY_PASS="$(openssl rand -hex 16)"
+            keytool -genkeypair -v -keystore "$RUNNER_TEMP/keystore/podroid-release.jks" \
+              -alias podroid -keyalg RSA -keysize 4096 -validity 10950 \
+              -storepass "$STORE_PASS" -keypass "$KEY_PASS" \
+              -dname "CN=Podroid Bootstrap, O=Podroid, C=BD" >/dev/null 2>&1
+            echo "PODROID_RELEASE_STORE_PASSWORD=$STORE_PASS" >> "$GITHUB_ENV"
+            echo "PODROID_RELEASE_KEY_ALIAS=podroid" >> "$GITHUB_ENV"
+            echo "PODROID_RELEASE_KEY_PASSWORD=$KEY_PASS" >> "$GITHUB_ENV"
+          fi
 
       - name: Build signed release APK
         run: ./gradlew assembleRelease
         env:
           ORG_GRADLE_PROJECT_PODROID_RELEASE_STORE_FILE: ${{ runner.temp }}/keystore/podroid-release.jks
-          ORG_GRADLE_PROJECT_PODROID_RELEASE_STORE_PASSWORD: ${{ secrets.PODROID_RELEASE_STORE_PASSWORD }}
-          ORG_GRADLE_PROJECT_PODROID_RELEASE_KEY_ALIAS: ${{ secrets.PODROID_RELEASE_KEY_ALIAS }}
-          ORG_GRADLE_PROJECT_PODROID_RELEASE_KEY_PASSWORD: ${{ secrets.PODROID_RELEASE_KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_PODROID_RELEASE_STORE_PASSWORD: ${{ env.PODROID_RELEASE_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_PODROID_RELEASE_KEY_ALIAS: ${{ env.PODROID_RELEASE_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_PODROID_RELEASE_KEY_PASSWORD: ${{ env.PODROID_RELEASE_KEY_PASSWORD }}
 
       - name: Verify APK signature
         run: |
