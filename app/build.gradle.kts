@@ -53,6 +53,14 @@ android {
                 storePassword = project.findProperty("PODROID_RELEASE_STORE_PASSWORD") as? String
                 keyAlias      = project.findProperty("PODROID_RELEASE_KEY_ALIAS")      as? String
                 keyPassword   = project.findProperty("PODROID_RELEASE_KEY_PASSWORD")   as? String
+                // Sign with v1 + v2 + v3 so the APK installs on the widest range
+                // of devices. v2-only (AGP's occasional default) triggers
+                // INSTALL_PARSE_FAILED ("problem parsing the package") on some
+                // OEM firmwares / older adb install paths that won't accept a
+                // v2-only signature. v1 (JAR) + v3 (rotatable) covers them.
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
