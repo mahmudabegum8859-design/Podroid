@@ -10,6 +10,8 @@ package com.excp.podroid
 import android.app.Application
 import android.os.Build
 import android.util.Log
+import com.excp.podroid.di.ApplicationScope
+import com.excp.podroid.util.AppLogger
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -20,11 +22,15 @@ import org.lsposed.hiddenapibypass.HiddenApiBypass
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import javax.inject.Inject
 
 @HiltAndroidApp
 class PodroidApplication : Application() {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @Inject
+    lateinit var appLogger: AppLogger
 
     // Completion signal for asset extraction. The VM launch path
     // (PodroidService.launchPodroid) reads the extracted files synchronously,
@@ -37,6 +43,8 @@ class PodroidApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         exemptHiddenApi()
+        // Begin external per-second diagnostics to /storage/emulated/0/openDemon/log.txt.
+        appLogger.start(appScope)
         // Extract off the main thread: the squashfs alone is ~225 MB and
         // blocking onCreate on first install/upgrade would ANR the cold start.
         appScope.launch { extractAssets() }

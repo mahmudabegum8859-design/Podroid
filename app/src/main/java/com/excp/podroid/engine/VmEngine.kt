@@ -91,4 +91,6 @@ data class VmConfig(
     val verboseLogging: Boolean = false,
     val x11Dpi: Int = 96,
     val usbPassthroughEnabled: Boolean = false,
+    /** Device DNS resolvers (IPv4 dotted-quad) to pass into the guest, in preference order. */
+    val dnsServers: List<String> = emptyList(),
 )

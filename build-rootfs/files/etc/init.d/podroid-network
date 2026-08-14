@@ -60,15 +60,36 @@ start() {
         fi
         # DHCP or static, make sure the SLIRP gateway route exists (idempotent).
         ip route add default via 10.0.2.2 dev "$NETIF" 2>/dev/null || true
-        # DNS: PUBLIC resolvers FIRST, SLIRP's forwarder last. SLIRP's internal
-        # forwarder resolves the host's resolv.conf, which doesn't exist on
-        # Android — with no upstream it can't answer, so a guest pointed at
-        # 10.0.2.3 first (the historical order) got slow/timeout lookups and
-        # "internet broken" (apk/curl/podman pulls all fail). Public DNS goes
-        # straight through SLIRP's NAT and works everywhere; 10.0.2.3 stays as
-        # a last-resort for hosts that block direct outbound DNS.
-        printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\nnameserver 10.0.2.3\n' \
-            > /etc/resolv.conf
+        # DNS: prefer the ANDROID DEVICE's own resolvers. The app passes them in
+        # via the `podroiddns=` kernel cmdline param (comma-separated IPv4). On
+        # many carriers the hardcoded public resolvers below (8.8.8.8 / 1.1.1.1)
+        # are blocked for outbound DNS, so a guest pointed at them first gets
+        # "DNS: no address for host" and apk/curl/podman pulls all fail. The
+        # device's real resolvers are reachable through SLIRP, so we write them
+        # FIRST and keep the public ones + SLIRP's 10.0.2.3 as fallbacks.
+        # Mirrors StrykerApp's bootroot, which writes the device net.dnsN into
+        # the guest resolv.conf rather than hardcoding public DNS.
+        : > /etc/resolv.conf
+        for _d in $(cat /proc/cmdline 2>/dev/null | tr ' ' '\n' | grep '^podroiddns=' | cut -d= -f2 | tr ',' ' '); do
+            case "$_d" in
+                *.*.*.*) echo "nameserver $_d" >> /etc/resolv.conf ;;
+            esac
+        done
+        if [ ! -s /etc/resolv.conf ]; then
+            printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' >> /etc/resolv.conf
+        fi
+        printf 'nameserver 10.0.2.3\n' >> /etc/resolv.conf
+        # Reachability probe: report which resolvers actually answer so the
+        # app-side log + console expose a DNS failure instead of a silent
+        # "internet broken". A 5s UDP/TCP probe to the first nameserver.
+        _probe_ns=$(awk '/^nameserver/ {print $NF; exit}' /etc/resolv.conf 2>/dev/null)
+        if [ -n "$_probe_ns" ] && command -v nc >/dev/null 2>&1; then
+            if nc -z -u -w2 "$_probe_ns" 53 2>/dev/null || nc -z -w2 "$_probe_ns" 53 2>/dev/null; then
+                echo "DNS: reachable via $_probe_ns" > /dev/console
+            else
+                echo "DNS: UNREACHABLE via $_probe_ns (check carrier DNS blocking)" > /dev/console
+            fi
+        fi
         # Mirror the AVF post-check: if the static assignment didn't stick
         # (wrong NIC, link not up), don't report success. Dependents that
         # `need` us would assume the link is up and then SSH/apk fail with no

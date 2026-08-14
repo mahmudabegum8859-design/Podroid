@@ -157,4 +157,65 @@ object NetworkUtils {
             }
         }
     }
+
+    /**
+     * The DNS servers the device is actually using, as IPv4 dotted-quad strings,
+     * in preference order. Used to seed the guest's `resolv.conf`: hardcoding
+     * public resolvers (8.8.8.8) inside the VM fails on carriers that block
+     * outbound DNS to non-carrier servers, so we pass the device's own resolvers
+     * through instead (same approach as StrykerApp's `bootroot`).
+     *
+     * Source order:
+     *   1. ConnectivityManager's per-link DNS (most accurate — reflects the
+     *      active transport's real servers, incl. VPN/Private DNS quirks).
+     *   2. The `net.dns1..4` system properties (legacy fallback the way
+     *      StrykerApp reads them via `getprop net.dnsN`).
+     * Drops empty/loopback/link-local entries. Returns an empty list when no
+     * usable resolver is discoverable (callers then fall back to public DNS).
+     */
+    fun deviceDnsServers(context: Context): List<String> {
+        val out = LinkedHashSet<String>()
+        val cm = try {
+            context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        } catch (_: Exception) {
+            null
+        }
+        fun add(addr: java.net.InetAddress?) {
+            if (addr == null) return
+            if (addr is Inet4Address &&
+                !addr.isLoopbackAddress &&
+                !addr.isLinkLocalAddress &&
+                !addr.isAnyLocalAddress
+            ) {
+                out.add(addr.hostAddress)
+            }
+        }
+        cm?.activeNetwork?.let { active ->
+            runCatching { cm.getLinkProperties(active)?.dnsServers }.getOrNull()?.forEach { add(it) }
+        }
+        if (out.isEmpty()) {
+            for (i in 1..4) {
+                val p = try {
+                    getSystemProperty("net.dns$i")
+                } catch (_: Exception) {
+                    null
+                }
+                if (!p.isNullOrEmpty() && p.matches(Regex("^\\d{1,3}(\\.\\d{1,3}){3}$"))) out.add(p)
+            }
+        }
+        return out.toList()
+    }
+
+    /**
+     * Reads an Android system property. `android.os.SystemProperties` is a
+     * hidden class (not on the public compile classpath), so we call it via
+     * reflection — the same value `getprop net.dnsN` returns on the shell.
+     */
+    private fun getSystemProperty(name: String): String? = try {
+        val cls = Class.forName("android.os.SystemProperties")
+        val m = cls.getMethod("get", String::class.java)
+        m.invoke(null, name) as? String
+    } catch (_: Exception) {
+        null
+    }
 }

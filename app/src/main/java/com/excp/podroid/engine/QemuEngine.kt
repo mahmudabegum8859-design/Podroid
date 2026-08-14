@@ -547,6 +547,13 @@ class QemuEngine @Inject constructor(
                 append(" androidip=").append(config.androidIp)
                 if (config.sshEnabled) append(" ssh=1")
                 append(" podroid.x11.dpi=").append(config.x11Dpi)
+                // Pass the device DNS servers into the guest as a space-separated
+                // list; podroid-network writes them first in /etc/resolv.conf so
+                // the VM uses the carrier's real resolvers instead of hardcoded
+                // public ones (which many carriers block for outbound DNS).
+                if (config.dnsServers.isNotEmpty()) {
+                    append(" podroiddns=").append(config.dnsServers.joinToString(","))
+                }
             }
             args += "-append"; args += cmdline
         } else {

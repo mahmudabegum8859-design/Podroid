@@ -355,6 +355,7 @@ class PodroidService : Service() {
                         verboseLogging = settingsRepository.getAvfVerboseLoggingSnapshot(),
                         x11Dpi = settingsRepository.getX11DpiSnapshot(),
                         usbPassthroughEnabled = settingsRepository.getUsbPassthroughEnabledSnapshot(),
+                        dnsServers = NetworkUtils.deviceDnsServers(this@PodroidService),
                     )
                     serviceScope.launch { observeStateForHostBridge() }
                     if (config.usbPassthroughEnabled) {
@@ -363,6 +364,11 @@ class PodroidService : Service() {
                     engine.start(rules, config)
                 } catch (e: Exception) {
                     Log.e(TAG, "QEMU failed to start", e)
+                    (application as? PodroidApplication)?.appLogger?.e(
+                        "PodroidService",
+                        "VM launch failed",
+                        e,
+                    )
                     // A Service-side throw here (failed asset extraction, a
                     // snapshot read, or engine.start()) can happen before the
                     // engine state ever leaves Idle. In that window the shutdown
